@@ -181,4 +181,23 @@ $checkConnectionButton.on("click", () => {
     });
 });
 
-$(() => browser.runtime.sendMessage({name: "send-trilium-search-status"}));
+const $darkModeButton = $("#dark-mode-button");
+
+function loadDarkModePreference() {
+    const isDarkMode = localStorage.getItem('darkMode') === 'true';
+    if (isDarkMode) {
+        document.body.classList.add('dark-mode');
+        $darkModeButton.text('Light mode');
+    }
+}
+
+$darkModeButton.on("click", () => {
+    const isDarkMode = document.body.classList.toggle('dark-mode');
+    localStorage.setItem('darkMode', isDarkMode.toString());
+    $darkModeButton.text(isDarkMode ? 'Light mode' : 'Dark mode');
+});
+
+$(() => {
+    loadDarkModePreference();
+    browser.runtime.sendMessage({name: "send-trilium-search-status"});
+});
