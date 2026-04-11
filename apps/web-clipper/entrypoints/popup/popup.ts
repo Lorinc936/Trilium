@@ -188,6 +188,9 @@ async function loadDarkModePreference() {
     if (darkMode) {
         document.body.classList.add('dark-mode');
         $darkModeButton.text('Light mode');
+    } else {
+        document.body.classList.remove('dark-mode');
+        $darkModeButton.text('Dark mode');
     }
 }
 
@@ -197,7 +200,7 @@ $darkModeButton.on("click", async () => {
     $darkModeButton.text(isDarkMode ? 'Light mode' : 'Dark mode');
 });
 
-$(() => {
-    loadDarkModePreference();
+$(async () => {
+    await loadDarkModePreference();
     browser.runtime.sendMessage({name: "send-trilium-search-status"});
 });

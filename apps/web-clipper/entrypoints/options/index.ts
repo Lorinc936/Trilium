@@ -62,7 +62,7 @@ async function saveTriliumServerSetup(e) {
         $triliumServerPassword.val('');
 
         browser.storage.sync.set({
-            triliumServerUrl: triliumServerUrl,
+            triliumServerUrl,
             authToken: json.token
         });
 
@@ -143,6 +143,9 @@ async function loadDarkModePreference() {
     if (darkMode) {
         document.body.classList.add('dark-mode');
         $darkModeButton.text('Light mode');
+    } else {
+        document.body.classList.remove('dark-mode');
+        $darkModeButton.text('Dark mode');
     }
 }
 
