@@ -30,6 +30,13 @@ body {
   transition: background-color 0.3s, color 0.3s;
 }
 
+.options-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 h1, h2 {
   color: var(--text-color);
 }
