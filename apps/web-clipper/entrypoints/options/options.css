@@ -55,7 +55,8 @@ input[type="password"] {
   font-family: sans-serif;
 }
 
-input[type="submit"] {
+input[type="submit"],
+.dark-mode-btn {
   background-color: var(--button-bg);
   color: var(--button-text);
   border: 1px solid var(--input-border);
@@ -65,8 +66,13 @@ input[type="submit"] {
   font-family: sans-serif;
 }
 
-input[type="submit"]:hover {
+input[type="submit"]:hover,
+.dark-mode-btn:hover {
   opacity: 0.8;
+}
+
+.dark-mode-btn {
+  white-space: nowrap;
 }
 
 a {
@@ -87,21 +93,6 @@ table tr td {
 
 table tr th {
   font-weight: bold;
-}
-
-.dark-mode-btn {
-  background-color: var(--button-bg);
-  color: var(--button-text);
-  border: 1px solid var(--input-border);
-  padding: 4px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: sans-serif;
-  white-space: nowrap;
-}
-
-.dark-mode-btn:hover {
-  opacity: 0.8;
 }
 
 #error-message,
