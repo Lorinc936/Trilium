@@ -1,8 +1,8 @@
 import type { AttributeRow } from "@triliumnext/commons";
 import { dayjs } from "@triliumnext/commons";
 import { formatLogMessage } from "@triliumnext/commons";
-import axios from "axios";
 import * as cheerio from "cheerio";
+import * as htmlParser from "node-html-parser";
 import xml2js from "xml2js";
 
 import becca from "../becca/becca.js";
@@ -81,10 +81,10 @@ export interface Api {
     originEntity?: AbstractBeccaEntity<any> | null;
 
     /**
-     * Axios library for HTTP requests. See {@link https://axios-http.com} for documentation
-     * @deprecated use native (browser compatible) fetch() instead
+     * @deprecated Axios was deprecated since April 2024 and has now been removed following the March 2026 supply chain attack.
+     * Use the native fetch() API instead.
      */
-    axios: typeof axios;
+    axios: undefined;
 
     /**
      * day.js library for date manipulation. See {@link https://day.js.org} for documentation
@@ -99,9 +99,15 @@ export interface Api {
 
     /**
      * cheerio library for HTML parsing and manipulation. See {@link https://cheerio.js.org} for documentation
+     * @deprecated cheerio will be removed in a future version. Use api.htmlParser (node-html-parser) instead.
      */
-
     cheerio: typeof cheerio;
+
+    /**
+     * node-html-parser library for HTML parsing. See {@link https://github.com/piotr-nicol/node-html-parser} for documentation.
+     * This is the recommended replacement for cheerio.
+     */
+    htmlParser: typeof htmlParser;
 
     /**
      * Instance name identifies particular Trilium instance. It can be useful for scripts
@@ -441,10 +447,18 @@ function BackendScriptApi(this: Api, currentNote: BNote, apiParams: ApiParams) {
         (this as any)[key] = apiParams[key as keyof ApiParams];
     }
 
-    this.axios = axios;
+    // Throw when axios is used (removed after 2 years of deprecation + supply chain attack)
+    const axiosError = () => {
+        throw new Error("api.axios was deprecated since 2024 and has been removed following the March 2026 npm supply chain compromise. Please update your script to use the native fetch() API.");
+    };
+    this.axios = new Proxy(axiosError, {
+        get: axiosError,
+        apply: axiosError
+    }) as unknown as undefined;
     this.dayjs = dayjs;
     this.xml2js = xml2js;
     this.cheerio = cheerio;
+    this.htmlParser = htmlParser;
     this.getInstanceName = () => (config.General ? config.General.instanceName : null);
     this.getNote = (noteId) => becca.getNote(noteId);
     this.getBranch = (branchId) => becca.getBranch(branchId);
@@ -697,7 +711,7 @@ function BackendScriptApi(this: Api, currentNote: BNote, apiParams: ApiParams) {
             return params.map((p) => {
                 if (typeof p === "function") {
                     return `!@#Function: ${p.toString()}`;
-                } 
+                }
                 return p;
             });
         }
