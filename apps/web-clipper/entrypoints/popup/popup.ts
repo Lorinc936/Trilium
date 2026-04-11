@@ -183,17 +183,17 @@ $checkConnectionButton.on("click", () => {
 
 const $darkModeButton = $("#dark-mode-button");
 
-function loadDarkModePreference() {
-    const isDarkMode = localStorage.getItem('darkMode') === 'true';
-    if (isDarkMode) {
+async function loadDarkModePreference() {
+    const {darkMode} = await browser.storage.sync.get<{ darkMode: boolean }>("darkMode");
+    if (darkMode) {
         document.body.classList.add('dark-mode');
         $darkModeButton.text('Light mode');
     }
 }
 
-$darkModeButton.on("click", () => {
+$darkModeButton.on("click", async () => {
     const isDarkMode = document.body.classList.toggle('dark-mode');
-    localStorage.setItem('darkMode', isDarkMode.toString());
+    await browser.storage.sync.set({darkMode: isDarkMode});
     $darkModeButton.text(isDarkMode ? 'Light mode' : 'Dark mode');
 });
 
