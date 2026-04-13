@@ -106,16 +106,21 @@
   },
   "delete_notes": {
     "delete_all_clones_description": "すべてのクローンも削除（最近の変更では元に戻すことができる）",
-    "erase_notes_description": "通常の（ソフト）削除では、ノートは削除されたものとしてマークされ、一定期間内に（最近の変更で）削除を取り消すことができます。このオプションをオンにすると、ノートは即座に削除され、削除を取り消すことはできません。",
+    "erase_notes_description": "ノートを一時保存せずに完全に削除します。この操作は元に戻すことができず、アプリケーションが再読み込みされます。",
     "erase_notes_warning": "すべてのクローンを含め、ノートを完全に消去します（元に戻せません）。これにより、アプリケーションは強制的にリロードされます。",
-    "notes_to_be_deleted": "以下のノートが削除されます ({{notesCount}})",
+    "notes_to_be_deleted": "削除対象のノート ({{notesCount}})",
     "no_note_to_delete": "ノートは削除されません（クローンのみ）。",
     "cancel": "キャンセル",
-    "ok": "OK",
     "close": "閉じる",
-    "delete_notes_preview": "ノートのプレビューを削除",
-    "broken_relations_to_be_deleted": "次のリレーション ({{relationCount}})は壊れているので消去されます",
-    "deleted_relation_text": "削除予定のノート{{- note}}は{{- source}}からリレーション{{- relation}}によって参照されています."
+    "broken_relations_to_be_deleted": "壊れたリレーション ({{relationCount}})",
+    "title": "ノートを削除",
+    "clones_label": "クローン",
+    "delete_clones_description_other": "他の {{count}} 件のクローンも削除します。最近の変更履歴から元に戻すことができます。",
+    "erase_notes_label": "完全に消去",
+    "table_note_with_relation": "リレーションがあるノート",
+    "table_relation": "リレーション",
+    "table_points_to": "参照先 (削除済み)",
+    "delete": "削除"
   },
   "calendar": {
     "mon": "月",
@@ -576,7 +581,10 @@
     "expand_first_level": "直下の子を展開",
     "expand_nth_level": "{{depth}} 階層下まで展開",
     "expand_all_levels": "すべての階層を展開",
-    "hide_child_notes": "ツリー内の子ノートを非表示"
+    "hide_child_notes": "ツリー内の子ノートを非表示",
+    "open_all_in_tabs": "すべて開く",
+    "open_all_in_tabs_tooltip": "すべての結果を新しいタブで開く",
+    "open_all_confirm": "{{count}} 件のノートが新しいタブで開かれます。続行しますか？"
   },
   "note_types": {
     "geo-map": "ジオマップ",
@@ -809,7 +817,8 @@
     "label_note": "ノート",
     "box_size_small": "スモール (~ 10 行)",
     "box_size_medium": "ミディアム (~ 30 行)",
-    "box_size_full": "フル (ボックスに全文が表示されます)"
+    "box_size_full": "フル (ボックスに全文が表示されます)",
+    "box_size_expandable": "展開可能 (デフォルトでは折りたたまれています)"
   },
   "ancestor": {
     "placeholder": "ノート名で検索",
@@ -1001,7 +1010,8 @@
     "date-and-time": "日時",
     "path": "パス",
     "database_backed_up_to": "データベースは{{backupFilePath}}にバックアップされました",
-    "no_backup_yet": "バックアップがありません"
+    "no_backup_yet": "バックアップがありません",
+    "download": "ダウンロード"
   },
   "password": {
     "wiki": "wiki",
@@ -1050,7 +1060,8 @@
     "test_title": "同期のテスト",
     "test_description": "これは同期サーバとの接続とハンドシェイクをテストします。同期サーバーが初期化されていない場合、ローカルドキュメントと同期するように設定します。",
     "test_button": "同期試行",
-    "handshake_failed": "同期サーバーのハンドシェイクに失敗しました。エラー: {{message}}"
+    "handshake_failed": "同期サーバーのハンドシェイクに失敗しました。エラー: {{message}}",
+    "timeout_description": "同期接続が遅い場合に、接続を諦めるまでの待機時間。ネットワークが不安定な場合は、この時間を長く設定してください。"
   },
   "api_log": {
     "close": "閉じる"
@@ -1352,7 +1363,8 @@
     "theme_none": "シンタックスハイライトなし",
     "theme_group_light": "ライトテーマ",
     "theme_group_dark": "ダークテーマ",
-    "copy_title": "クリップボードにコピー"
+    "copy_title": "クリップボードにコピー",
+    "click_to_copy": "クリックしてコピー"
   },
   "editor": {
     "title": "エディター"
@@ -1541,7 +1553,8 @@
     "collapse": "通常サイズに折りたたむ",
     "title": "ノートマップ",
     "link-distance": "リンク距離",
-    "fix-nodes": "ノードを修正"
+    "fix-nodes": "ノードを修正",
+    "too-many-notes": "このサブツリーには {{count}} 件のノートが含まれており、ノートマップに表示できる {{max}} の上限を超えています。"
   },
   "owned_attribute_list": {
     "owned_attributes": "所有属性"
@@ -2271,7 +2284,8 @@
     "note_context_disabled": "クリックして現在のノートをコンテキストに含める",
     "no_provider_message": "AI プロバイダーが設定されていません。チャットを開始するには、プロバイダーを追加してください。",
     "add_provider": "AI プロバイダーを追加",
-    "sources_summary": "{{count}} 件のソースを {{sites}} サイトから取得"
+    "sources_summary": "{{count}} 件のソースを {{sites}} サイトから取得",
+    "stop": "停止"
   },
   "sidebar_chat": {
     "title": "AI チャット",
@@ -2335,7 +2349,11 @@
       "web_search": "Web 検索",
       "note_in_parent": "<Note/> を <Parent/>",
       "get_attachment": "添付ファイルを取得",
-      "get_attachment_content": "添付ファイルの内容を読み取る"
+      "get_attachment_content": "添付ファイルの内容を読み取る",
+      "rename_note": "ノート名を変更",
+      "delete_note": "ノートを削除",
+      "move_note": "ノートを移動",
+      "clone_note": "ノートをクローン"
     }
   },
   "ocr": {
