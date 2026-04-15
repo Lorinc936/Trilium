@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { isValidElement, VNode } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 
+import appContext from "../components/app_context";
 import NoteContext from "../components/note_context";
 import FNote from "../entities/fnote";
 import type { PrintReport } from "../print";
@@ -146,13 +147,21 @@ export default function NoteDetail() {
             toast.closePersistent("printing");
             handlePrintReport(printReport);
         };
+        const onPreviewResult = (_e: any, { buffer, notePath }: { buffer: Uint8Array; notePath: string }) => {
+            toast.closePersistent("printing");
+            if (note) {
+                appContext.triggerCommand("showPrintPreview", { pdfBuffer: buffer, note, notePath });
+            }
+        };
         ipcRenderer.on("print-progress", onPrintProgress);
         ipcRenderer.on("print-done", onPrintDone);
+        ipcRenderer.on("export-as-pdf-preview-result", onPreviewResult);
         return () => {
             ipcRenderer.off("print-progress", onPrintProgress);
             ipcRenderer.off("print-done", onPrintDone);
+            ipcRenderer.off("export-as-pdf-preview-result", onPreviewResult);
         };
-    }, []);
+    }, [note]);
 
     useTriliumEvent("executeInActiveNoteDetailWidget", ({ callback }) => {
         if (!noteContext?.isActive()) return;
@@ -215,11 +224,14 @@ export default function NoteDetail() {
         showToast("exporting_pdf");
 
         const { ipcRenderer } = dynamicRequire("electron");
-        ipcRenderer.send("export-as-pdf", {
+        ipcRenderer.send("export-as-pdf-preview", {
             title: note.title,
             notePath: noteContext.notePath,
             pageSize: note.getAttributeValue("label", "printPageSize") ?? "Letter",
-            landscape: note.hasAttribute("label", "printLandscape")
+            landscape: note.hasAttribute("label", "printLandscape"),
+            scale: parseFloat(note.getAttributeValue("label", "printScale") ?? "1") || 1,
+            margins: note.getAttributeValue("label", "printMargins") ?? "default",
+            pageRanges: ""
         });
     });
 

@@ -86,6 +86,41 @@ interface ExportAsPdfOpts {
     title: string;
     landscape: boolean;
     pageSize: "A0" | "A1" | "A2" | "A3" | "A4" | "A5" | "A6" | "Legal" | "Letter" | "Tabloid" | "Ledger";
+    scale: number;
+    margins: string;
+    pageRanges: string;
+}
+
+/** Parses the printMargins attribute into Electron margins.
+ *  Values are stored in mm and converted to inches for Electron.
+ *  Presets expand to explicit numeric margins since Electron's `marginType` aliases
+ *  (especially `none` and `printableArea`) behave inconsistently for PDF output. */
+function parseMargins(margins: string): Electron.Margins {
+    const mmToInches = (mm: number) => mm / 25.4;
+    const uniform = (mm: number): Electron.Margins => ({
+        marginType: "custom",
+        top: mmToInches(mm),
+        right: mmToInches(mm),
+        bottom: mmToInches(mm),
+        left: mmToInches(mm)
+    });
+
+    if (!margins || margins === "default") return uniform(20);  // 2cm
+    if (margins === "none") return uniform(0);
+    if (margins === "minimum") return uniform(5);
+
+    const parts = margins.split(",").map(Number);
+    if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+        return {
+            marginType: "custom",
+            top: mmToInches(parts[0]),
+            right: mmToInches(parts[1]),
+            bottom: mmToInches(parts[2]),
+            left: mmToInches(parts[3])
+        };
+    }
+
+    return uniform(10);
 }
 
 electron.ipcMain.on("print-note", async (e, { notePath }: PrintOpts) => {
@@ -107,7 +142,7 @@ electron.ipcMain.on("print-note", async (e, { notePath }: PrintOpts) => {
     }
 });
 
-electron.ipcMain.on("export-as-pdf", async (e, { title, notePath, landscape, pageSize }: ExportAsPdfOpts) => {
+electron.ipcMain.on("export-as-pdf", async (e, { title, notePath, landscape, pageSize, scale, margins, pageRanges }: ExportAsPdfOpts) => {
     try {
         const { browserWindow, printReport } = await getBrowserWindowForPrinting(e, notePath, "exporting_pdf");
 
@@ -128,6 +163,9 @@ electron.ipcMain.on("export-as-pdf", async (e, { title, notePath, landscape, pag
                 buffer = await browserWindow.webContents.printToPDF({
                     landscape,
                     pageSize,
+                    scale,
+                    margins: parseMargins(margins),
+                    pageRanges: pageRanges || undefined,
                     generateDocumentOutline: true,
                     generateTaggedPDF: true,
                     printBackground: true,
@@ -166,6 +204,70 @@ electron.ipcMain.on("export-as-pdf", async (e, { title, notePath, landscape, pag
             stack: err instanceof Error ? err.stack : undefined
         });
     }
+});
+
+electron.ipcMain.on("export-as-pdf-preview", async (e, { notePath, landscape, pageSize, scale, margins, pageRanges }: ExportAsPdfOpts) => {
+    try {
+        const { browserWindow, printReport } = await getBrowserWindowForPrinting(e, notePath, "exporting_pdf");
+
+        try {
+            const buffer = await browserWindow.webContents.printToPDF({
+                landscape,
+                pageSize,
+                scale,
+                margins: parseMargins(margins),
+                pageRanges: pageRanges || undefined,
+                generateDocumentOutline: true,
+                generateTaggedPDF: true,
+                printBackground: true,
+                displayHeaderFooter: true,
+                headerTemplate: `<div></div>`,
+                footerTemplate: `
+                    <div class="pageNumber" style="width: 100%; text-align: center; font-size: 10pt;">
+                    </div>
+                `
+            });
+
+            e.sender.send("export-as-pdf-preview-result", { buffer, notePath });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            e.sender.send("export-as-pdf-preview-result", { notePath, error: message });
+        } finally {
+            e.sender.send("print-done", printReport);
+            browserWindow.destroy();
+        }
+    } catch (err) {
+        e.sender.send("print-done", {
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined
+        });
+    }
+});
+
+electron.ipcMain.on("save-pdf", async (_e, { title, buffer }: { title: string; buffer: Buffer }) => {
+    const focusedWindow = electron.BrowserWindow.getFocusedWindow();
+    if (!focusedWindow) return;
+
+    const filePath = electron.dialog.showSaveDialogSync(focusedWindow, {
+        defaultPath: formatDownloadTitle(title, "file", "application/pdf"),
+        filters: [
+            {
+                name: t("pdf.export_filter"),
+                extensions: ["pdf"]
+            }
+        ]
+    });
+    if (!filePath) return;
+
+    try {
+        await fs.writeFile(filePath, Buffer.from(buffer));
+    } catch (_e) {
+        electron.dialog.showErrorBox(t("pdf.unable-to-export-title"), t("pdf.unable-to-save-message"));
+        return;
+    }
+
+    electron.shell.openPath(filePath);
 });
 
 async function getBrowserWindowForPrinting(e: IpcMainEvent, notePath: string, action: "printing" | "exporting_pdf") {

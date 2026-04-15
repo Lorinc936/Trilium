@@ -19,8 +19,8 @@ import { openInAppHelpFromUrl } from "../../services/utils";
 import { formatDateTime } from "../../utils/formatters";
 import { BacklinksList, useBacklinkCount } from "../FloatingButtonsDefinitions";
 import Dropdown, { DropdownProps } from "../react/Dropdown";
-import { FormDropdownDivider, FormListItem } from "../react/FormList";
-import { useActiveNoteContext, useLegacyImperativeHandlers, useNoteLabel, useNoteProperty, useStaticTooltip, useTriliumEvent, useTriliumEvents } from "../react/hooks";
+import { FormDropdownDivider, FormListHeader, FormListItem } from "../react/FormList";
+import { useActiveNoteContext, useLegacyImperativeHandlers, useNoteLabel, useNoteLabelInt, useNoteLabelOptionalBool, useNoteProperty, useStaticTooltip, useTriliumEvent, useTriliumEvents, useTriliumOptionBool, useTriliumOptionInt } from "../react/hooks";
 import Icon from "../react/Icon";
 import LinkButton from "../react/LinkButton";
 import { ParentComponent } from "../react/react_utils";
@@ -69,6 +69,7 @@ export default function StatusBar() {
 
                     <div className="actions-row">
                         <CodeNoteSwitcher {...context} />
+                        <TabWidthSwitcher {...context} />
                         <LanguageSwitcher {...context} />
                         {!isHiddenNote && <NotePaths {...context} />}
                         <AttributesButton {...attributesContext} />
@@ -431,6 +432,135 @@ function NotePaths({ note, hoistedNoteId, notePath }: StatusBarContext) {
                 sortedNotePaths={sortedNotePaths}
                 currentNotePath={notePath}
             />
+        </StatusBarDropdown>
+    );
+}
+//#endregion
+
+//#region Tab width switcher
+const TAB_WIDTH_OPTIONS = [1, 2, 3, 4, 6, 8] as const;
+
+/**
+ * Converts the leading indentation on each line to a new style. Non-leading whitespace is preserved.
+ *
+ * - "spaces" source means leading runs of spaces are grouped by `fromWidth` to compute the indent level.
+ * - "tabs" source means each leading tab counts as one indent level (leading spaces are preserved as alignment).
+ */
+function convertIndentation(
+    content: string,
+    from: { useTabs: boolean; width: number },
+    to: { useTabs: boolean; width: number }
+): string {
+    if (from.useTabs === to.useTabs && from.width === to.width) return content;
+    const toUnit = to.useTabs ? "\t" : " ".repeat(to.width);
+
+    return content.replace(/^[ \t]+/gm, (leading) => {
+        let levels: number;
+        let remainder = "";
+        if (from.useTabs) {
+            const match = leading.match(/^(\t*)(.*)$/s)!;
+            levels = match[1].length;
+            remainder = match[2];
+        } else {
+            const spaces = leading.length;
+            levels = from.width > 0 ? Math.round(spaces / from.width) : 0;
+            const aligned = levels * from.width;
+            remainder = spaces > aligned ? " ".repeat(spaces - aligned) : "";
+        }
+        return toUnit.repeat(levels) + remainder;
+    });
+}
+
+function TabWidthSwitcher({ note, noteContext }: StatusBarContext) {
+    const [ globalTabWidth ] = useTriliumOptionInt("codeNoteTabWidth");
+    const [ globalUseTabs ] = useTriliumOptionBool("codeNoteIndentWithTabs");
+    const [ noteTabWidth, setNoteTabWidth ] = useNoteLabelInt(note, "tabWidth");
+    const [ noteUseTabs, setNoteUseTabs ] = useNoteLabelOptionalBool(note, "indentWithTabs");
+    const effectiveTabWidth = noteTabWidth ?? globalTabWidth;
+    const effectiveUseTabs = noteUseTabs ?? globalUseTabs;
+    const hasWidthOverride = noteTabWidth != null;
+    const hasStyleOverride = noteUseTabs != null;
+
+    const reindentTo = async (targetUseTabs: boolean, targetWidth: number) => {
+        const editor = await noteContext.getCodeEditor();
+        if (!editor) return;
+        const converted = convertIndentation(
+            editor.getText(),
+            { useTabs: effectiveUseTabs, width: effectiveTabWidth },
+            { useTabs: targetUseTabs, width: targetWidth }
+        );
+        if (converted !== editor.getText()) {
+            editor.setText(converted);
+        }
+        setNoteTabWidth(targetWidth);
+        setNoteUseTabs(targetUseTabs);
+    };
+
+    const statusText = effectiveUseTabs
+        ? t("status_bar.tab_width_tabs", { width: effectiveTabWidth })
+        : t("status_bar.tab_width_spaces_short", { width: effectiveTabWidth });
+
+    return (note.type === "code" &&
+        <StatusBarDropdown
+            icon="bx bx-right-indent"
+            text={statusText}
+            title={t("status_bar.tab_width_title")}
+        >
+            <FormListHeader text={t("status_bar.tab_width_style_header")} />
+            <FormListItem
+                checked={!effectiveUseTabs}
+                onClick={() => setNoteUseTabs(false)}
+            >
+                {t("status_bar.tab_width_style_spaces")}
+            </FormListItem>
+            <FormListItem
+                checked={effectiveUseTabs}
+                onClick={() => setNoteUseTabs(true)}
+            >
+                {t("status_bar.tab_width_style_tabs")}
+            </FormListItem>
+            {hasStyleOverride &&
+                <FormListItem icon="bx bx-x" onClick={() => setNoteUseTabs(null)}>
+                    {t("status_bar.tab_width_use_default_style", {
+                        style: globalUseTabs ? t("status_bar.tab_width_style_tabs") : t("status_bar.tab_width_style_spaces")
+                    })}
+                </FormListItem>
+            }
+
+            <FormDropdownDivider />
+            <FormListHeader text={t("status_bar.tab_width_display_header")} />
+            {TAB_WIDTH_OPTIONS.map(size => (
+                <FormListItem
+                    key={`display-${size}`}
+                    checked={effectiveTabWidth === size}
+                    onClick={() => setNoteTabWidth(size)}
+                >
+                    {t("status_bar.tab_width_spaces", { count: size })}
+                </FormListItem>
+            ))}
+            {hasWidthOverride &&
+                <FormListItem icon="bx bx-x" onClick={() => setNoteTabWidth(null)}>
+                    {t("status_bar.tab_width_use_default", { width: globalTabWidth })}
+                </FormListItem>
+            }
+
+            <FormDropdownDivider />
+            <FormListHeader text={t("status_bar.tab_width_reindent_header")} />
+            {TAB_WIDTH_OPTIONS.map(size => (
+                <FormListItem
+                    key={`reindent-spaces-${size}`}
+                    disabled={!effectiveUseTabs && effectiveTabWidth === size}
+                    onClick={() => reindentTo(false, size)}
+                >
+                    {t("status_bar.tab_width_spaces", { count: size })}
+                </FormListItem>
+            ))}
+            <FormListItem
+                disabled={effectiveUseTabs}
+                onClick={() => reindentTo(true, effectiveTabWidth)}
+            >
+                {t("status_bar.tab_width_style_tabs")}
+            </FormListItem>
         </StatusBarDropdown>
     );
 }
