@@ -1,10 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import FNote from "../../entities/fnote";
 import { t } from "../../services/i18n";
 import toast from "../../services/toast";
 import { dynamicRequire, isElectron } from "../../services/utils";
 import Button, { ButtonGroup } from "../react/Button";
+import Dropdown from "../react/Dropdown";
+import { FormListHeader, FormListItem } from "../react/FormList";
 import { useNoteLabelBoolean, useNoteLabelWithDefault, useTriliumEvent } from "../react/hooks";
 import Modal from "../react/Modal";
 import Slider from "../react/Slider";
@@ -13,6 +15,26 @@ import OptionsRow from "../type_widgets/options/components/OptionsRow";
 import OptionsSection from "../type_widgets/options/components/OptionsSection";
 
 const PAGE_SIZES = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "Legal", "Letter", "Tabloid", "Ledger"] as const;
+
+/** Pseudo-printer name used to route the Print button to the PDF export flow. */
+const DESTINATION_PDF = "__pdf__";
+
+interface PrinterInfo {
+    name: string;
+    displayName: string;
+    description: string;
+    location: string;
+    isDefault: boolean;
+}
+
+/** Builds the description line shown under a printer in the dropdown. */
+function buildPrinterDescription(printer: PrinterInfo): string | undefined {
+    const parts: string[] = [];
+    if (printer.isDefault) parts.push(t("print_preview.destination_default"));
+    if (printer.location) parts.push(printer.location);
+    else if (printer.description) parts.push(printer.description);
+    return parts.length ? parts.join(" · ") : undefined;
+}
 const MARGIN_PRESETS = ["default", "none", "minimum"] as const;
 type MarginPreset = typeof MARGIN_PRESETS[number];
 
@@ -69,6 +91,8 @@ export default function PrintPreviewDialog() {
     const [loading, setLoading] = useState(false);
     const bufferRef = useRef<Uint8Array>();
     const notePathRef = useRef("");
+    const pdfUrlRef = useRef<string>();
+    const generationRef = useRef(0);
 
     const [landscape, setLandscape] = useNoteLabelBoolean(note, "printLandscape");
     const [pageSize, setPageSize] = useNoteLabelWithDefault(note, "printPageSize", "Letter");
@@ -81,36 +105,127 @@ export default function PrintPreviewDialog() {
     const [pageRanges, setPageRanges] = useState("");
     const pageRangesValid = isValidPageRanges(pageRanges);
 
+    // Printer list and current destination. DESTINATION_PDF means "Save as PDF";
+    // any other value is the system printer name to use for silent printing.
+    const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+    const [destination, setDestination] = useState<string>(DESTINATION_PDF);
+
+    const skipNextRegenRef = useRef(false);
+
+    useEffect(() => {
+        if (!shown || !isElectron()) return;
+        const { ipcRenderer } = dynamicRequire("electron");
+        ipcRenderer.invoke("get-printers").then((list: PrinterInfo[]) => {
+            setPrinters(list ?? []);
+            const defaultPrinter = list?.find((p) => p.isDefault);
+            if (defaultPrinter) setDestination(defaultPrinter.name);
+        });
+    }, [shown]);
+
     const updatePreview = useCallback((buffer: Uint8Array) => {
         bufferRef.current = buffer;
 
-        if (pdfUrl) {
-            URL.revokeObjectURL(pdfUrl);
+        if (pdfUrlRef.current) {
+            URL.revokeObjectURL(pdfUrlRef.current);
         }
 
         const blob = new Blob([buffer as BlobPart], { type: "application/pdf" });
-        setPdfUrl(URL.createObjectURL(blob));
+        const url = URL.createObjectURL(blob);
+        pdfUrlRef.current = url;
+        setPdfUrl(url);
         setLoading(false);
-    }, [pdfUrl]);
+    }, []);
 
     useTriliumEvent("showPrintPreview", (data: PrintPreviewData) => {
+        // When the dialog is already open, it manages its own regeneration via
+        // a persistent IPC listener. Ignore duplicate events from NoteDetail's
+        // listener to avoid overwriting the preview with stale data.
+        if (shown) return;
+
+        skipNextRegenRef.current = true;
         setNote(data.note);
         notePathRef.current = data.notePath;
         updatePreview(data.pdfBuffer);
         setShown(true);
     });
 
+    // Handle regeneration results via a persistent listener scoped to the
+    // dialog's lifecycle. A generation counter discards stale results when
+    // multiple requests overlap.
+    useEffect(() => {
+        if (!shown || !isElectron()) return;
+        const { ipcRenderer } = dynamicRequire("electron");
+
+        const onResult = (_e: any, { buffer, error }: { buffer?: Uint8Array; error?: string }) => {
+            if (generationRef.current <= 0) return;
+
+            toast.closePersistent("printing");
+            if (error) {
+                setLoading(false);
+                if (pdfUrlRef.current) {
+                    URL.revokeObjectURL(pdfUrlRef.current);
+                    pdfUrlRef.current = undefined;
+                    setPdfUrl(undefined);
+                }
+                toast.showPersistent({
+                    id: "print-preview-error",
+                    icon: "bx bx-error-circle",
+                    message: `${t("print_preview.render_error")}\n\n${error}`
+                });
+                return;
+            }
+            toast.closePersistent("print-preview-error");
+            if (buffer) {
+                updatePreview(buffer);
+            }
+        };
+        ipcRenderer.on("export-as-pdf-preview-result", onResult);
+        return () => {
+            ipcRenderer.off("export-as-pdf-preview-result", onResult);
+        };
+    }, [shown, updatePreview]);
+
+    const regeneratePreview = useCallback((opts: PreviewOpts) => {
+        if (!isElectron()) return;
+
+        ++generationRef.current;
+        setLoading(true);
+        const { ipcRenderer } = dynamicRequire("electron");
+        ipcRenderer.send("export-as-pdf-preview", {
+            notePath: notePathRef.current,
+            pageSize: opts.pageSize,
+            landscape: opts.landscape,
+            scale: opts.scale,
+            margins: opts.margins,
+            pageRanges: opts.pageRanges
+        });
+    }, []);
+
+    useEffect(() => {
+        if (!shown || !pageRangesValid) return;
+        if (skipNextRegenRef.current) {
+            skipNextRegenRef.current = false;
+            return;
+        }
+        const handle = setTimeout(() => {
+            regeneratePreview({ landscape, pageSize, scale, margins: marginsStr, pageRanges: pageRanges.trim() });
+        }, 400);
+        return () => clearTimeout(handle);
+    }, [shown, landscape, pageSize, scale, marginsStr, pageRanges, pageRangesValid, regeneratePreview]);
+
     function handleClose() {
         setShown(false);
-        if (pdfUrl) {
-            URL.revokeObjectURL(pdfUrl);
+        toast.closePersistent("print-preview-error");
+        if (pdfUrlRef.current) {
+            URL.revokeObjectURL(pdfUrlRef.current);
+            pdfUrlRef.current = undefined;
             setPdfUrl(undefined);
         }
         bufferRef.current = undefined;
         setLoading(false);
     }
 
-    function handleSave() {
+    function handleExportPdf() {
         if (!bufferRef.current) return;
 
         const { ipcRenderer } = dynamicRequire("electron");
@@ -121,90 +236,39 @@ export default function PrintPreviewDialog() {
         handleClose();
     }
 
-    function handleOrientationChange(newLandscape: boolean) {
-        if (newLandscape === landscape) return;
-        setLandscape(newLandscape);
-        regeneratePreview({ landscape: newLandscape, pageSize, scale, margins: marginsStr, pageRanges });
+    function handlePrint(silent: boolean, deviceName?: string) {
+        if (!isElectron()) return;
+        const { ipcRenderer } = dynamicRequire("electron");
+        ipcRenderer.send("print-from-preview", {
+            notePath: notePathRef.current,
+            pageSize,
+            landscape,
+            scale,
+            margins: marginsStr,
+            pageRanges,
+            silent,
+            deviceName
+        });
+        handleClose();
     }
 
-    function handlePageSizeChange(newPageSize: string) {
-        if (newPageSize === pageSize) return;
-        setPageSize(newPageSize);
-        regeneratePreview({ landscape, pageSize: newPageSize, scale, margins: marginsStr, pageRanges });
+    /** Primary action: route to PDF export or silent print based on the selected destination. */
+    function handlePrimaryAction() {
+        if (destination === DESTINATION_PDF) {
+            handleExportPdf();
+        } else {
+            handlePrint(true, destination);
+        }
     }
-
-    const scaleDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
     function handleScaleChange(newScale: number) {
         const clamped = Math.min(2, Math.max(0.1, Math.round(newScale * 10) / 10));
         setScaleStr(String(clamped));
-
-        clearTimeout(scaleDebounceRef.current);
-        scaleDebounceRef.current = setTimeout(() => {
-            regeneratePreview({ landscape, pageSize, scale: clamped, margins: marginsStr, pageRanges });
-        }, 500);
     }
-
-    function handleMarginPresetChange(newPreset: string) {
-        if (newPreset === marginPreset) return;
-        const newValue = serializeMargins(newPreset as MarginPreset | "custom", customMargins);
-        setMarginsStr(newValue);
-        regeneratePreview({ landscape, pageSize, scale, margins: newValue, pageRanges });
-    }
-
-    const marginDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
     function handleCustomMarginChange(side: keyof CustomMargins, value: number) {
         const newCustom = { ...customMargins, [side]: Math.max(0, value) };
-        const newValue = serializeMargins("custom", newCustom);
-        setMarginsStr(newValue);
-
-        clearTimeout(marginDebounceRef.current);
-        marginDebounceRef.current = setTimeout(() => {
-            regeneratePreview({ landscape, pageSize, scale, margins: newValue, pageRanges });
-        }, 500);
-    }
-
-    const pageRangesDebounceRef = useRef<ReturnType<typeof setTimeout>>();
-
-    function handlePageRangesChange(newValue: string) {
-        setPageRanges(newValue);
-
-        clearTimeout(pageRangesDebounceRef.current);
-        if (!isValidPageRanges(newValue)) return;
-
-        pageRangesDebounceRef.current = setTimeout(() => {
-            regeneratePreview({ landscape, pageSize, scale, margins: marginsStr, pageRanges: newValue.trim() });
-        }, 600);
-    }
-
-    function regeneratePreview(opts: PreviewOpts) {
-        if (!isElectron()) return;
-
-        setLoading(true);
-        const { ipcRenderer } = dynamicRequire("electron");
-
-        const onResult = (_e: any, { buffer, error }: { buffer?: Uint8Array; error?: string }) => {
-            toast.closePersistent("printing");
-            if (error) {
-                setLoading(false);
-                toast.showError(t("print_preview.render_error"));
-                return;
-            }
-            if (buffer) {
-                updatePreview(buffer);
-            }
-        };
-        ipcRenderer.once("export-as-pdf-preview-result", onResult);
-
-        ipcRenderer.send("export-as-pdf-preview", {
-            notePath: notePathRef.current,
-            pageSize: opts.pageSize,
-            landscape: opts.landscape,
-            scale: opts.scale,
-            margins: opts.margins,
-            pageRanges: opts.pageRanges
-        });
+        setMarginsStr(serializeMargins("custom", newCustom));
     }
 
     return (
@@ -215,22 +279,68 @@ export default function PrintPreviewDialog() {
             show={shown}
             onHidden={handleClose}
             bodyStyle={{ height: "78vh", padding: 0, display: "flex" }}
+            footerAlignment="between"
             footer={
                 <>
-                    <Button text={t("print_preview.close")} onClick={handleClose} />
-                    <Button text={t("print_preview.save")} className="btn-primary" onClick={handleSave} disabled={loading} />
+                    <a
+                        href="#"
+                        class={loading ? "disabled" : ""}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            if (loading) return;
+                            // When a specific printer is selected, pre-select it in the system dialog.
+                            const deviceName = destination === DESTINATION_PDF ? undefined : destination;
+                            handlePrint(false, deviceName);
+                        }}
+                    >
+                        {t("print_preview.system_print")}
+                    </a>
+                    <Button
+                        text={destination === DESTINATION_PDF ? t("print_preview.export_pdf") : t("print_preview.print")}
+                        icon={destination === DESTINATION_PDF ? "bx-file" : "bx-printer"}
+                        className="btn-primary"
+                        onClick={handlePrimaryAction}
+                        disabled={loading}
+                    />
                 </>
             }
         >
             <div style={{ padding: "16px", minWidth: "250px", overflowY: "auto" }}>
                 <OptionsSection>
+                    <OptionsRow name="destination" label={t("print_preview.destination")}>
+                        <Dropdown
+                            disabled={loading}
+                            text={<DestinationLabel destination={destination} printers={printers} />}
+                        >
+                            <FormListItem
+                                icon="bx bxs-file-pdf"
+                                selected={destination === DESTINATION_PDF}
+                                onClick={() => setDestination(DESTINATION_PDF)}
+                            >
+                                {t("print_preview.destination_pdf")}
+                            </FormListItem>
+                            {printers.length > 0 && <FormListHeader text={t("print_preview.destination_printers")} />}
+                            {printers.map((printer) => (
+                                <FormListItem
+                                    key={printer.name}
+                                    icon="bx bx-printer"
+                                    selected={destination === printer.name}
+                                    onClick={() => setDestination(printer.name)}
+                                    description={buildPrinterDescription(printer)}
+                                >
+                                    {printer.displayName || printer.name}
+                                </FormListItem>
+                            ))}
+                        </Dropdown>
+                    </OptionsRow>
+
                     <OptionsRow name="orientation" label={t("print_preview.orientation")}>
                         <ButtonGroup>
                             <Button
                                 text={t("print_preview.portrait")}
                                 icon="bx-rectangle bx-rotate-90"
                                 className={!landscape ? "active" : ""}
-                                onClick={() => handleOrientationChange(false)}
+                                onClick={() => setLandscape(false)}
                                 disabled={loading}
                                 size="small"
                             />
@@ -238,7 +348,7 @@ export default function PrintPreviewDialog() {
                                 text={t("print_preview.landscape")}
                                 icon="bx-rectangle"
                                 className={landscape ? "active" : ""}
-                                onClick={() => handleOrientationChange(true)}
+                                onClick={() => setLandscape(true)}
                                 disabled={loading}
                                 size="small"
                             />
@@ -249,7 +359,7 @@ export default function PrintPreviewDialog() {
                         <select
                             class="form-select form-select-sm"
                             value={pageSize}
-                            onChange={(e) => handlePageSizeChange((e.target as HTMLSelectElement).value)}
+                            onChange={(e) => setPageSize((e.target as HTMLSelectElement).value)}
                             disabled={loading}
                         >
                             {PAGE_SIZES.map((size) => (
@@ -272,7 +382,7 @@ export default function PrintPreviewDialog() {
                         <select
                             class="form-select form-select-sm"
                             value={marginPreset}
-                            onChange={(e) => handleMarginPresetChange((e.target as HTMLSelectElement).value)}
+                            onChange={(e) => setMarginsStr(serializeMargins((e.target as HTMLSelectElement).value as MarginPreset | "custom", customMargins))}
                             disabled={loading}
                         >
                             <option value="default">{t("print_preview.margins_default")}</option>
@@ -296,7 +406,7 @@ export default function PrintPreviewDialog() {
                             class={`form-control form-control-sm ${!pageRangesValid ? "is-invalid" : ""}`}
                             value={pageRanges}
                             placeholder={t("print_preview.page_ranges_placeholder")}
-                            onInput={(e) => handlePageRangesChange((e.target as HTMLInputElement).value)}
+                            onInput={(e) => setPageRanges((e.target as HTMLInputElement).value)}
                             disabled={loading}
                             style={{ width: "140px" }}
                         />
@@ -310,10 +420,18 @@ export default function PrintPreviewDialog() {
                         <span class="bx bx-loader-circle bx-spin" style={{ fontSize: "2rem" }} />
                     </div>
                 )}
-                {pdfUrl && <PdfViewer pdfUrl={pdfUrl} />}
+                {pdfUrl && <PdfViewer pdfUrl={pdfUrl} disableSelection />}
             </div>
         </Modal>
     );
+}
+
+function DestinationLabel({ destination, printers }: { destination: string; printers: PrinterInfo[] }) {
+    if (destination === DESTINATION_PDF) {
+        return <><span class="bx bxs-file-pdf" /> {t("print_preview.destination_pdf")}</>;
+    }
+    const printer = printers.find((p) => p.name === destination);
+    return <><span class="bx bx-printer" /> {printer?.displayName || printer?.name || destination}</>;
 }
 
 function MarginEditor({ margins, onChange, disabled }: {
